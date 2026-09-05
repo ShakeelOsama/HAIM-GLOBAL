@@ -91,17 +91,7 @@ async function FeaturedProducts() {
   }
 
   if (featured.length === 0) {
-    return (
-      <div className="text-center py-12 text-stone-400">
-        <p className="text-sm">
-          No featured products yet.{" "}
-          <Link href="/api/seed" className="text-brand-600 underline">
-            Seed the database
-          </Link>{" "}
-          to get started.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   return (

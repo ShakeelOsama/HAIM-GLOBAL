@@ -14,6 +14,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { cacheLife, cacheTag } from "next/cache";
+import { STATIC_PRODUCTS } from "@/lib/static/products";
 
 export type Product = typeof products.$inferSelect;
 
@@ -79,6 +80,34 @@ function buildOrderBy(sort: SortOption = "newest") {
   return map[sort];
 }
 
+function filterAndSortStatic(filters: ProductFilters): Product[] {
+  let items = STATIC_PRODUCTS.filter((p) => {
+    if (!p.isActive) return false;
+    if (filters.categoryId && p.categoryId !== filters.categoryId) return false;
+    if (filters.minPriceCents !== undefined && p.price < filters.minPriceCents) return false;
+    if (filters.maxPriceCents !== undefined && p.price > filters.maxPriceCents) return false;
+    if (filters.organic && !p.isOrganic) return false;
+    if (filters.inStock && p.stock === 0) return false;
+    if (filters.onSale && !(p.comparePrice !== null && p.comparePrice > p.price)) return false;
+    if (filters.search) {
+      const term = filters.search.toLowerCase();
+      if (
+        !p.name.toLowerCase().includes(term) &&
+        !(p.shortDescription ?? "").toLowerCase().includes(term)
+      )
+        return false;
+    }
+    return true;
+  });
+
+  const sort = filters.sort ?? "newest";
+  if (sort === "price_asc") items = [...items].sort((a, b) => a.price - b.price);
+  else if (sort === "price_desc") items = [...items].sort((a, b) => b.price - a.price);
+  else if (sort === "name_asc") items = [...items].sort((a, b) => a.name.localeCompare(b.name));
+
+  return items;
+}
+
 /** Dynamic — called per-request, driven by searchParams filters */
 export async function getProducts(
   filters: ProductFilters = {}
@@ -86,7 +115,16 @@ export async function getProducts(
   const { page = 1, limit = 24, sort = "newest" } = filters;
 
   if (!isDatabaseConfigured) {
-    return { items: [], total: 0, page, limit, pageCount: 0 };
+    const all = filterAndSortStatic({ ...filters, sort });
+    const total = all.length;
+    const offset = (page - 1) * limit;
+    return {
+      items: all.slice(offset, offset + limit),
+      total,
+      page,
+      limit,
+      pageCount: Math.ceil(total / limit),
+    };
   }
 
   const offset = (page - 1) * limit;
@@ -118,7 +156,8 @@ export async function getFeaturedProducts(limit = 8): Promise<Product[]> {
   cacheLife("hours");
   cacheTag("products", "featured");
 
-  if (!isDatabaseConfigured) return [];
+  if (!isDatabaseConfigured)
+    return STATIC_PRODUCTS.filter((p) => p.isFeatured && p.isActive).slice(0, limit);
 
   return db
     .select()
@@ -133,7 +172,10 @@ export async function getProductsOnSale(limit = 24): Promise<Product[]> {
   cacheLife("hours");
   cacheTag("products", "deals");
 
-  if (!isDatabaseConfigured) return [];
+  if (!isDatabaseConfigured)
+    return STATIC_PRODUCTS.filter(
+      (p) => p.isActive && p.comparePrice !== null && p.comparePrice > p.price
+    ).slice(0, limit);
 
   return db
     .select()
@@ -154,7 +196,8 @@ export async function getProductBySlug(slug: string): Promise<Product | null> {
   cacheLife("hours");
   cacheTag("products", `product:${slug}`);
 
-  if (!isDatabaseConfigured) return null;
+  if (!isDatabaseConfigured)
+    return STATIC_PRODUCTS.find((p) => p.slug === slug && p.isActive) ?? null;
 
   const [result] = await db
     .select()
@@ -174,7 +217,10 @@ export async function getRelatedProducts(
   cacheLife("hours");
   cacheTag("products", `category:${categoryId}`);
 
-  if (!isDatabaseConfigured) return [];
+  if (!isDatabaseConfigured)
+    return STATIC_PRODUCTS.filter(
+      (p) => p.categoryId === categoryId && p.isActive && p.id !== excludeId
+    ).slice(0, limit);
 
   return db
     .select()
@@ -195,7 +241,8 @@ export async function getAllProductSlugs(): Promise<string[]> {
   cacheLife("hours");
   cacheTag("products");
 
-  if (!isDatabaseConfigured) return [];
+  if (!isDatabaseConfigured)
+    return STATIC_PRODUCTS.filter((p) => p.isActive).map((p) => p.slug);
 
   const rows = await db
     .select({ slug: products.slug })

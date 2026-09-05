@@ -1,11 +1,21 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { categories, products } from "@/lib/db/schema";
 
-// Only callable in development — use /api/seed once to populate the DB
-export async function POST() {
-  if (process.env.NODE_ENV !== "development") {
-    return NextResponse.json({ error: "Only available in development" }, { status: 403 });
+// POST /api/seed?secret=<SEED_SECRET> — populates the DB with initial data
+export async function POST(request: NextRequest) {
+  const secret = request.nextUrl.searchParams.get("secret");
+  const expectedSecret = process.env.SEED_SECRET;
+
+  if (expectedSecret && secret !== expectedSecret) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  if (!expectedSecret && process.env.NODE_ENV !== "development") {
+    return NextResponse.json(
+      { error: "Set SEED_SECRET env var to enable seeding in production" },
+      { status: 403 }
+    );
   }
 
   await db.delete(products);
